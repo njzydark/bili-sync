@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use regex;
 use serde::{Deserialize, Serialize};
 
 use crate::bilibili::error::BiliError;
@@ -216,11 +217,15 @@ impl PageAnalyzer {
             };
             let quality = VideoQuality::from_repr(quality as usize).context("invalid video stream quality")?;
             // 从视频流的 codecs 字段中获取编码格式，此处并非精确匹配而是判断包含，比如 codecs 是 av1.42c01e，需要匹配为 av1
-            let Some(codecs) = [VideoCodecs::HEV, VideoCodecs::AVC, VideoCodecs::AV1]
-                .into_iter()
-                .find(|c| codecs.contains(c.as_ref()))
-            else {
-                // 少数情况会走到此处，如 codecs 为 dvh1.08.09、hvc1.2.4.L123.90 等，直接跳过，不影响流程
+            let Some(codecs) = [
+                (VideoCodecs::HEV, r"(hev|hvc\d)"),
+                (VideoCodecs::AVC, r"avc\d"),
+                (VideoCodecs::AV1, r"av\d+"),
+            ]
+            .into_iter()
+            .find(|(_, pattern)| regex::Regex::new(pattern).unwrap().is_match(codecs))
+            .map(|(codec, _)| codec) else {
+                // 少数情况会走到此处，如 codecs 为 dvh1.08.09 等，直接跳过，不影响流程
                 continue;
             };
             if !filter_option.codecs.contains(&codecs)
